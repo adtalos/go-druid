@@ -111,7 +111,7 @@ func (c *connection) startRequestPipeline() {
 				res, err := c.Client.Do(req)
 				if err != nil {
 					c.errorCh <- err
-					return
+					continue
 				}
 
 				body, err := ioutil.ReadAll(res.Body)
