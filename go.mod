@@ -1,4 +1,4 @@
-module github.com/peak-ai/go-druid
+module github.com/adtalos/go-druid
 
 go 1.15
 
