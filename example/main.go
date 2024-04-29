@@ -3,8 +3,8 @@ package main
 import (
 	"log"
 
+	"github.com/adtalos/go-druid/dsql"
 	"github.com/jmoiron/sqlx"
-	"github.com/peak-ai/go-druid/dsql"
 )
 
 // Entry -

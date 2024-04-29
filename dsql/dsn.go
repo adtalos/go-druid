@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"log"
 	"net/url"
+	"strconv"
+	"time"
 )
 
 // Config represents a struct to a druid database
@@ -22,12 +24,14 @@ type Config struct {
 
 	// UseSSL determines whether to use SSL or not
 	UseSSL bool
+
+	Timeout time.Duration
 }
 
 // FormatDSN formats a data source name from a config struct
 func (c *Config) FormatDSN() (dsn string) {
 	if c.BrokerAddr == "" {
-		log.Fatal("druid: you must specify a brokeraddr")
+		log.Fatal("druid: you must specify a broker addr")
 	}
 
 	var auth string
@@ -78,6 +82,13 @@ func ParseDSN(dsn string) *Config {
 	}
 	cfg.PingEndpoint = q.Get("pingEndpoint")
 	cfg.QueryEndpoint = q.Get("queryEndpoint")
+	if t := q.Get("timeout"); t != "" {
+		if timeout, err := strconv.ParseInt(t, 10, 64); err != nil {
+			log.Fatal("error parsing dsn timeout", err)
+		} else {
+			cfg.Timeout = time.Duration(timeout) * time.Second
+		}
+	}
 	cfg.User = u.User.Username()
 	pass, _ := u.User.Password()
 	cfg.Passwd = pass

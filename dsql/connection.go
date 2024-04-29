@@ -9,11 +9,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/ioutil"
-	"log"
+	"io"
 	"net/http"
 	"reflect"
-	"sync"
 )
 
 var (
@@ -31,29 +29,17 @@ var (
 
 	// ErrMakingRequest is an error whilst making a request to the druid server itself
 	ErrMakingRequest = errors.New("druid: error making request to druid server")
+
+	ErrArgsNotImplement = errors.New("druid: args not implement")
 )
 
 func wrapErr(a, b error) error {
 	return fmt.Errorf("%v: %v", a, b)
 }
 
-type key int
-
-const (
-	transportKey key = iota
-	requestKey
-)
-
 type connection struct {
-	Client    *http.Client
-	Cfg       *Config
-	closeCh   chan struct{}
-	watcherCh chan context.Context
-	errorCh   chan error
-	resultsCh chan []byte
-	requestCh chan *http.Request
-	closed    bool
-	mtx       sync.Mutex
+	Client *http.Client
+	Cfg    *Config
 }
 
 type queryRequest struct {
@@ -71,14 +57,6 @@ func (c *connection) Prepare(stmt string) (driver.Stmt, error) {
 
 // Close closes a connection.
 func (c *connection) Close() (err error) {
-	if c.closed {
-		return
-	}
-	c.mtx.Lock()
-	c.closed = true
-	c.mtx.Unlock()
-	close(c.closeCh)
-	c.Client = nil
 	return
 }
 
@@ -88,7 +66,7 @@ func (c *connection) Begin() (tx driver.Tx, err error) {
 	return tx, driver.ErrSkip
 }
 
-// Ping implmements db.conn.Prepare and hits the health endpoint of a broker
+// Ping implements db.conn.Prepare and hits the health endpoint of a broker
 func (c *connection) Ping(ctx context.Context) error {
 	res, err := c.Client.Get(fmt.Sprintf("%s%s", c.Cfg.BrokerAddr, c.Cfg.PingEndpoint))
 	if err != nil {
@@ -103,34 +81,26 @@ func (c *connection) Ping(ctx context.Context) error {
 	return nil
 }
 
-func (c *connection) startRequestPipeline() {
-	go func() {
-		for {
-			select {
-			case req := <-c.requestCh:
-				res, err := c.Client.Do(req)
-				if err != nil {
-					c.errorCh <- err
-					continue
-				}
-
-				body, err := ioutil.ReadAll(res.Body)
-				if err != nil {
-					c.errorCh <- err
-				}
-
-				// @todo do we still want to do this if there was an error above?
-				c.resultsCh <- body
-			case <-c.closeCh:
-				return
-			}
-		}
-	}()
+func (c *connection) Query(q string, args []driver.Value) (driver.Rows, error) {
+	if len(args) > 0 {
+		return &rows{}, ErrArgsNotImplement
+	}
+	req, err := c.makeRequest(q)
+	if err != nil {
+		return &rows{}, err
+	}
+	return c.query(req)
 }
 
-// Query queries the druid sql api
-func (c *connection) Query(q string, args []driver.Value) (driver.Rows, error) {
-	return c.query(q, args)
+func (c *connection) QueryContext(ctx context.Context, q string, args []driver.NamedValue) (driver.Rows, error) {
+	if len(args) > 0 {
+		return &rows{}, ErrArgsNotImplement
+	}
+	req, err := c.makeRequest(q)
+	if err != nil {
+		return &rows{}, err
+	}
+	return c.query(req.WithContext(ctx))
 }
 
 func (c *connection) makeRequest(q string) (*http.Request, error) {
@@ -225,27 +195,21 @@ func (c *connection) parseResponse(body *bufio.Reader) (r *rows, err error) {
 	return r, nil
 }
 
-func (c *connection) query(q string, args []driver.Value) (*rows, error) {
-	req, err := c.makeRequest(q)
-	if err != nil {
-		return &rows{}, err
-	}
-
+func (c *connection) query(req *http.Request) (*rows, error) {
 	res, err := c.Client.Do(req)
-
 	if err != nil {
 		return &rows{}, err
 	}
+	defer res.Body.Close()
 
 	code := res.StatusCode
 	if code != http.StatusOK {
-		body, err := ioutil.ReadAll(res.Body)
+		body, err := io.ReadAll(res.Body)
 		if err != nil {
 			return &rows{}, err
 		}
 
-		log.Println(string(body))
-		return &rows{}, fmt.Errorf("error making query request to druid, status code: %d", code)
+		return &rows{}, fmt.Errorf("error making query request to druid, status code: %d, %s", code, string(body))
 	}
 
 	response, err := c.parseResponse(bufio.NewReader(res.Body))
@@ -254,50 +218,4 @@ func (c *connection) query(q string, args []driver.Value) (*rows, error) {
 	}
 
 	return response, nil
-}
-
-func (c *connection) queryContext(ctx context.Context, q string, args []driver.NamedValue) (*rows, error) {
-	req, err := c.makeRequest(q)
-	if err != nil {
-		return &rows{}, wrapErr(ErrCreatingRequest, err)
-	}
-
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-
-	req = req.WithContext(ctx)
-
-	c.requestCh <- req
-	tr := &http.Transport{}
-	c.Client.Transport = tr
-
-	var r *rows
-
-	select {
-	case body := <-c.resultsCh:
-		r, err = c.parseResponse(bufio.NewReader(bytes.NewReader(body)))
-		if err != nil {
-			return r, err
-		}
-	case err = <-c.errorCh:
-	case <-ctx.Done():
-		err = ctx.Err()
-		return r, err
-	}
-
-	return r, err
-}
-
-// QueryContext -
-func (c *connection) QueryContext(ctx context.Context, q string, args []driver.NamedValue) (driver.Rows, error) {
-	vals, err := namedValuesToValues(args)
-	if err != nil {
-		return nil, err
-	}
-
-	if ctx.Done() == nil {
-		return c.query(q, vals)
-	}
-
-	return c.queryContext(ctx, q, args)
 }
