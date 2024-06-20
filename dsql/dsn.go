@@ -54,7 +54,7 @@ func (c *Config) FormatDSN() (dsn string) {
 		sslEnabled = "true"
 	}
 
-	return fmt.Sprintf("%s%s?pingEndpoint=%s&queryEndpoint=%s&sslenable=%s", auth, c.BrokerAddr, pingEndpoint, queryEndpoint, sslEnabled)
+	return fmt.Sprintf("%s%s?pingEndpoint=%s&queryEndpoint=%s&sslenable=%s&timeout=%d", auth, c.BrokerAddr, pingEndpoint, queryEndpoint, sslEnabled, c.Timeout/time.Second)
 }
 
 // ParseDSN returns a config struct from a dsn string
