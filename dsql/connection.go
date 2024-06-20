@@ -43,9 +43,10 @@ type connection struct {
 }
 
 type queryRequest struct {
-	Query        string `json:"query"`
-	ResultFormat string `json:"resultFormat"`
-	Header       bool   `json:"header"`
+	Query        string                 `json:"query"`
+	ResultFormat string                 `json:"resultFormat"`
+	Header       bool                   `json:"header"`
+	Context      map[string]interface{} `json:"context"`
 }
 
 type queryResponse [][]interface{}
@@ -109,6 +110,7 @@ func (c *connection) makeRequest(q string) (*http.Request, error) {
 		Query:        q,
 		ResultFormat: "arrayLines",
 		Header:       true,
+		Context:      map[string]interface{}{"timeout": c.Cfg.Timeout},
 	}
 
 	payload, err := json.Marshal(request)
