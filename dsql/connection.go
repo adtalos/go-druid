@@ -12,6 +12,7 @@ import (
 	"io"
 	"net/http"
 	"reflect"
+	"time"
 )
 
 var (
@@ -110,7 +111,7 @@ func (c *connection) makeRequest(q string) (*http.Request, error) {
 		Query:        q,
 		ResultFormat: "arrayLines",
 		Header:       true,
-		Context:      map[string]interface{}{"timeout": c.Cfg.Timeout},
+		Context:      map[string]interface{}{"timeout": c.Cfg.Timeout / time.Millisecond},
 	}
 
 	payload, err := json.Marshal(request)
